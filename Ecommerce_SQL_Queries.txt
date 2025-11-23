@@ -1,0 +1,567 @@
+═══════════════════════════════════════════════════════════════
+    E-COMMERCE ANALYTICS - SQL QUERIES DOCUMENTATION
+           FashionHub Retail Analysis Project
+═══════════════════════════════════════════════════════════════
+
+PROJECT: E-Commerce Customer Analytics Dashboard
+ANALYST: Sweatha Hari
+PURPOSE: Document all SQL queries used for data extraction and analysis
+DATABASE: PostgreSQL (or MySQL compatible)
+
+═══════════════════════════════════════════════════════════════
+TABLE OF CONTENTS
+═══════════════════════════════════════════════════════════════
+
+1. Database Schema
+2. Data Extraction Queries
+3. KPI Calculation Queries
+4. Customer Segmentation Queries
+5. Trend Analysis Queries
+6. Product Performance Queries
+7. Advanced Analytics Queries
+
+═══════════════════════════════════════════════════════════════
+1. DATABASE SCHEMA
+═══════════════════════════════════════════════════════════════
+
+Table: transactions
+---------------------
+Columns:
+- transaction_id (VARCHAR): Unique transaction identifier
+- customer_id (VARCHAR): Unique customer identifier
+- order_date (DATE): Date of purchase
+- category (VARCHAR): Product category
+- product (VARCHAR): Product name
+- quantity (INT): Number of items purchased
+- unit_price (DECIMAL): Price per unit
+- total_amount (DECIMAL): Total transaction value
+- segment (VARCHAR): Customer segment classification
+
+Sample Records: 17,736 transactions
+Date Range: 2023-01-01 to 2023-12-31
+
+═══════════════════════════════════════════════════════════════
+2. DATA EXTRACTION QUERIES
+═══════════════════════════════════════════════════════════════
+
+QUERY 2.1: Extract All Transactions for Analysis
+-------------------------------------------------
+Purpose: Pull complete transaction dataset for dashboard
+
+SELECT 
+    transaction_id,
+    customer_id,
+    order_date,
+    category,
+    product,
+    quantity,
+    unit_price,
+    total_amount,
+    segment,
+    EXTRACT(YEAR FROM order_date) AS year,
+    EXTRACT(MONTH FROM order_date) AS month,
+    TO_CHAR(order_date, 'Mon') AS month_name,
+    TO_CHAR(order_date, 'YYYY-MM') AS year_month
+FROM transactions
+WHERE order_date BETWEEN '2023-01-01' AND '2023-12-31'
+ORDER BY order_date;
+
+Sample Output:
+transaction_id | customer_id | order_date | category          | total_amount
+TXN1000       | CUST00001   | 2023-01-04 | Women's Clothing  | 145.50
+TXN1001       | CUST00002   | 2023-01-05 | Accessories       | 45.00
+
+Records Returned: 17,736
+
+═══════════════════════════════════════════════════════════════
+3. KPI CALCULATION QUERIES
+═══════════════════════════════════════════════════════════════
+
+QUERY 3.1: Overall Business KPIs
+---------------------------------
+Purpose: Calculate key performance indicators for dashboard
+
+SELECT 
+    COUNT(DISTINCT transaction_id) AS total_orders,
+    COUNT(DISTINCT customer_id) AS total_customers,
+    SUM(total_amount) AS total_revenue,
+    AVG(total_amount) AS avg_order_value,
+    SUM(quantity) AS total_units_sold,
+    MIN(order_date) AS period_start,
+    MAX(order_date) AS period_end
+FROM transactions
+WHERE order_date BETWEEN '2023-01-01' AND '2023-12-31';
+
+Expected Output:
+total_orders  | total_customers | total_revenue | avg_order_value
+17,736       | 3,245          | 4,245,905.06  | 239.39
+
+
+QUERY 3.2: Repeat Purchase Rate
+--------------------------------
+Purpose: Calculate customer retention metric
+
+WITH customer_orders AS (
+    SELECT 
+        customer_id,
+        COUNT(DISTINCT transaction_id) AS order_count
+    FROM transactions
+    WHERE order_date BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY customer_id
+)
+SELECT 
+    COUNT(CASE WHEN order_count > 1 THEN 1 END) AS repeat_customers,
+    COUNT(*) AS total_customers,
+    ROUND(
+        100.0 * COUNT(CASE WHEN order_count > 1 THEN 1 END) / COUNT(*), 
+        2
+    ) AS repeat_purchase_rate_pct
+FROM customer_orders;
+
+Expected Output:
+repeat_customers | total_customers | repeat_purchase_rate_pct
+1,039           | 3,245          | 32.01
+
+
+QUERY 3.3: Average Order Value by Customer Segment
+--------------------------------------------------
+Purpose: Compare spending patterns across segments
+
+SELECT 
+    segment,
+    COUNT(DISTINCT transaction_id) AS orders,
+    COUNT(DISTINCT customer_id) AS customers,
+    SUM(total_amount) AS revenue,
+    ROUND(AVG(total_amount), 2) AS avg_order_value,
+    ROUND(SUM(total_amount) / COUNT(DISTINCT customer_id), 2) AS revenue_per_customer
+FROM transactions
+WHERE order_date BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY segment
+ORDER BY revenue DESC;
+
+Expected Output:
+segment   | orders | customers | revenue      | avg_order_value | revenue_per_customer
+Champions | 5,257  | 584      | 1,245,890.50 | 237.05         | 2,133.05
+Loyal     | 4,982  | 713      | 1,125,340.25 | 225.90         | 1,578.54
+
+═══════════════════════════════════════════════════════════════
+4. CUSTOMER SEGMENTATION QUERIES
+═══════════════════════════════════════════════════════════════
+
+QUERY 4.1: RFM Analysis - Customer Scoring
+-------------------------------------------
+Purpose: Calculate Recency, Frequency, Monetary scores for segmentation
+
+WITH customer_rfm AS (
+    SELECT 
+        customer_id,
+        MAX(order_date) AS last_purchase_date,
+        COUNT(DISTINCT transaction_id) AS frequency,
+        SUM(total_amount) AS monetary_value,
+        CURRENT_DATE - MAX(order_date) AS recency_days
+    FROM transactions
+    WHERE order_date BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY customer_id
+),
+rfm_scores AS (
+    SELECT 
+        customer_id,
+        recency_days,
+        frequency,
+        monetary_value,
+        NTILE(5) OVER (ORDER BY recency_days DESC) AS recency_score,
+        NTILE(5) OVER (ORDER BY frequency) AS frequency_score,
+        NTILE(5) OVER (ORDER BY monetary_value) AS monetary_score
+    FROM customer_rfm
+)
+SELECT 
+    customer_id,
+    recency_days,
+    frequency,
+    ROUND(monetary_value, 2) AS monetary_value,
+    recency_score,
+    frequency_score,
+    monetary_score,
+    (recency_score + frequency_score + monetary_score) AS rfm_total_score,
+    CASE 
+        WHEN recency_score >= 4 AND frequency_score >= 4 AND monetary_score >= 4 THEN 'Champions'
+        WHEN recency_score >= 3 AND frequency_score >= 3 THEN 'Loyal'
+        WHEN recency_score <= 2 AND frequency_score >= 3 THEN 'At-Risk'
+        WHEN recency_score = 1 THEN 'Lost'
+        WHEN recency_score >= 4 AND frequency_score <= 2 THEN 'New'
+        ELSE 'Others'
+    END AS customer_segment
+FROM rfm_scores
+ORDER BY rfm_total_score DESC;
+
+Sample Output:
+customer_id | recency_days | frequency | monetary_value | segment
+CUST00145   | 15          | 12        | 2,450.00      | Champions
+CUST00289   | 8           | 9         | 1,890.50      | Loyal
+
+
+QUERY 4.2: Customer Segment Distribution
+-----------------------------------------
+Purpose: Count customers in each segment for dashboard
+
+SELECT 
+    segment,
+    COUNT(DISTINCT customer_id) AS customer_count,
+    ROUND(100.0 * COUNT(DISTINCT customer_id) / SUM(COUNT(DISTINCT customer_id)) OVER (), 2) AS percentage
+FROM transactions
+WHERE order_date BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY segment
+ORDER BY customer_count DESC;
+
+Expected Output:
+segment   | customer_count | percentage
+Loyal     | 713           | 21.97
+New       | 649           | 20.00
+Champions | 584           | 18.00
+
+
+QUERY 4.3: High-Value Customers (Top 20%)
+------------------------------------------
+Purpose: Identify VIP customers for targeted campaigns
+
+WITH customer_lifetime_value AS (
+    SELECT 
+        customer_id,
+        SUM(total_amount) AS total_spent,
+        COUNT(DISTINCT transaction_id) AS total_orders,
+        MAX(order_date) AS last_order_date
+    FROM transactions
+    WHERE order_date BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY customer_id
+)
+SELECT 
+    customer_id,
+    ROUND(total_spent, 2) AS lifetime_value,
+    total_orders,
+    last_order_date,
+    ROUND(total_spent / total_orders, 2) AS avg_order_value
+FROM customer_lifetime_value
+WHERE total_spent >= (
+    SELECT PERCENTILE_CONT(0.80) WITHIN GROUP (ORDER BY total_spent)
+    FROM customer_lifetime_value
+)
+ORDER BY total_spent DESC
+LIMIT 100;
+
+Expected Output: Top 100 customers representing ~40-50% of revenue
+
+═══════════════════════════════════════════════════════════════
+5. TREND ANALYSIS QUERIES
+═══════════════════════════════════════════════════════════════
+
+QUERY 5.1: Monthly Revenue Trend
+---------------------------------
+Purpose: Track revenue performance month-over-month
+
+SELECT 
+    TO_CHAR(order_date, 'YYYY-MM') AS year_month,
+    TO_CHAR(order_date, 'Mon YYYY') AS month_name,
+    COUNT(DISTINCT transaction_id) AS orders,
+    COUNT(DISTINCT customer_id) AS customers,
+    SUM(total_amount) AS revenue,
+    ROUND(AVG(total_amount), 2) AS avg_order_value
+FROM transactions
+WHERE order_date BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY 
+    TO_CHAR(order_date, 'YYYY-MM'),
+    TO_CHAR(order_date, 'Mon YYYY')
+ORDER BY year_month;
+
+Expected Output:
+year_month | month_name | orders | customers | revenue     | avg_order_value
+2023-01   | Jan 2023  | 1,205  | 890      | 285,450.00  | 236.89
+2023-02   | Feb 2023  | 1,187  | 865      | 279,125.50  | 235.21
+
+
+QUERY 5.2: Month-over-Month Growth Rate
+----------------------------------------
+Purpose: Calculate growth metrics for trend analysis
+
+WITH monthly_metrics AS (
+    SELECT 
+        TO_CHAR(order_date, 'YYYY-MM') AS year_month,
+        SUM(total_amount) AS revenue
+    FROM transactions
+    WHERE order_date BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY TO_CHAR(order_date, 'YYYY-MM')
+)
+SELECT 
+    year_month,
+    ROUND(revenue, 2) AS current_month_revenue,
+    ROUND(LAG(revenue) OVER (ORDER BY year_month), 2) AS previous_month_revenue,
+    ROUND(
+        100.0 * (revenue - LAG(revenue) OVER (ORDER BY year_month)) / 
+        NULLIF(LAG(revenue) OVER (ORDER BY year_month), 0), 
+        2
+    ) AS mom_growth_rate_pct
+FROM monthly_metrics
+ORDER BY year_month;
+
+Expected Output shows growth trend with peak in Nov-Dec
+
+
+QUERY 5.3: Day of Week Analysis
+--------------------------------
+Purpose: Identify best days for marketing campaigns
+
+SELECT 
+    TO_CHAR(order_date, 'Day') AS day_of_week,
+    EXTRACT(DOW FROM order_date) AS day_number,
+    COUNT(DISTINCT transaction_id) AS orders,
+    SUM(total_amount) AS revenue,
+    ROUND(AVG(total_amount), 2) AS avg_order_value
+FROM transactions
+WHERE order_date BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY 
+    TO_CHAR(order_date, 'Day'),
+    EXTRACT(DOW FROM order_date)
+ORDER BY day_number;
+
+Insight: Weekends typically show higher order values
+
+═══════════════════════════════════════════════════════════════
+6. PRODUCT PERFORMANCE QUERIES
+═══════════════════════════════════════════════════════════════
+
+QUERY 6.1: Category Performance Analysis
+-----------------------------------------
+Purpose: Analyze revenue distribution by product category
+
+SELECT 
+    category,
+    COUNT(DISTINCT transaction_id) AS orders,
+    SUM(quantity) AS units_sold,
+    SUM(total_amount) AS revenue,
+    ROUND(AVG(total_amount), 2) AS avg_order_value,
+    ROUND(100.0 * SUM(total_amount) / SUM(SUM(total_amount)) OVER (), 2) AS revenue_percentage
+FROM transactions
+WHERE order_date BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY category
+ORDER BY revenue DESC;
+
+Expected Output:
+category          | orders | units_sold | revenue       | revenue_percentage
+Women's Clothing  | 7,856  | 12,450    | 2,135,260.74  | 50.30
+Men's Clothing    | 5,234  | 8,120     | 1,130,584.53  | 26.63
+
+
+QUERY 6.2: Top 10 Products by Revenue
+--------------------------------------
+Purpose: Identify best-selling products
+
+SELECT 
+    category,
+    product,
+    COUNT(DISTINCT transaction_id) AS orders,
+    SUM(quantity) AS units_sold,
+    ROUND(SUM(total_amount), 2) AS revenue,
+    ROUND(AVG(unit_price), 2) AS avg_price
+FROM transactions
+WHERE order_date BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY category, product
+ORDER BY revenue DESC
+LIMIT 10;
+
+Expected Output: Top products across all categories
+
+
+QUERY 6.3: Product Category by Customer Segment
+------------------------------------------------
+Purpose: Understand segment preferences
+
+SELECT 
+    segment,
+    category,
+    COUNT(DISTINCT transaction_id) AS orders,
+    SUM(total_amount) AS revenue,
+    ROUND(100.0 * SUM(total_amount) / SUM(SUM(total_amount)) OVER (PARTITION BY segment), 2) AS pct_of_segment_revenue
+FROM transactions
+WHERE order_date BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY segment, category
+ORDER BY segment, revenue DESC;
+
+Insight: Champions prefer premium categories
+
+
+QUERY 6.4: Slow-Moving Products
+--------------------------------
+Purpose: Identify products with low sales velocity
+
+SELECT 
+    category,
+    product,
+    COUNT(DISTINCT transaction_id) AS orders,
+    SUM(quantity) AS units_sold,
+    MAX(order_date) AS last_sold_date,
+    CURRENT_DATE - MAX(order_date) AS days_since_last_sale
+FROM transactions
+GROUP BY category, product
+HAVING COUNT(DISTINCT transaction_id) < 10
+ORDER BY days_since_last_sale DESC;
+
+Action: Consider discontinuation or promotional pricing
+
+═══════════════════════════════════════════════════════════════
+7. ADVANCED ANALYTICS QUERIES
+═══════════════════════════════════════════════════════════════
+
+QUERY 7.1: Cohort Analysis - Monthly Retention
+-----------------------------------------------
+Purpose: Track customer retention by acquisition month
+
+WITH first_purchase AS (
+    SELECT 
+        customer_id,
+        DATE_TRUNC('month', MIN(order_date)) AS cohort_month
+    FROM transactions
+    GROUP BY customer_id
+),
+customer_activity AS (
+    SELECT 
+        t.customer_id,
+        fp.cohort_month,
+        DATE_TRUNC('month', t.order_date) AS activity_month,
+        EXTRACT(MONTH FROM AGE(t.order_date, fp.cohort_month)) AS months_since_first
+    FROM transactions t
+    JOIN first_purchase fp ON t.customer_id = fp.customer_id
+)
+SELECT 
+    TO_CHAR(cohort_month, 'YYYY-MM') AS cohort,
+    COUNT(DISTINCT CASE WHEN months_since_first = 0 THEN customer_id END) AS month_0,
+    COUNT(DISTINCT CASE WHEN months_since_first = 1 THEN customer_id END) AS month_1,
+    COUNT(DISTINCT CASE WHEN months_since_first = 2 THEN customer_id END) AS month_2,
+    COUNT(DISTINCT CASE WHEN months_since_first = 3 THEN customer_id END) AS month_3,
+    ROUND(100.0 * COUNT(DISTINCT CASE WHEN months_since_first = 1 THEN customer_id END) / 
+          NULLIF(COUNT(DISTINCT CASE WHEN months_since_first = 0 THEN customer_id END), 0), 2) AS retention_rate_m1
+FROM customer_activity
+GROUP BY cohort_month
+ORDER BY cohort_month;
+
+Insight: Shows retention rates for each cohort
+
+
+QUERY 7.2: Customer Lifetime Value (CLV) Prediction
+----------------------------------------------------
+Purpose: Estimate future customer value
+
+WITH customer_metrics AS (
+    SELECT 
+        customer_id,
+        COUNT(DISTINCT transaction_id) AS purchase_frequency,
+        AVG(total_amount) AS avg_order_value,
+        MAX(order_date) AS last_purchase,
+        MIN(order_date) AS first_purchase,
+        EXTRACT(DAY FROM (MAX(order_date) - MIN(order_date))) AS customer_lifespan_days
+    FROM transactions
+    WHERE order_date BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY customer_id
+)
+SELECT 
+    customer_id,
+    purchase_frequency,
+    ROUND(avg_order_value, 2) AS avg_order_value,
+    customer_lifespan_days,
+    ROUND(
+        avg_order_value * purchase_frequency * 
+        (365.0 / NULLIF(customer_lifespan_days, 0)) * 3, 
+        2
+    ) AS estimated_3year_clv
+FROM customer_metrics
+WHERE customer_lifespan_days > 0
+ORDER BY estimated_3year_clv DESC
+LIMIT 100;
+
+Business Use: Target high-CLV customers for retention
+
+
+QUERY 7.3: Market Basket Analysis
+----------------------------------
+Purpose: Find products frequently purchased together
+
+WITH transaction_products AS (
+    SELECT 
+        transaction_id,
+        STRING_AGG(product, ', ' ORDER BY product) AS product_combo
+    FROM transactions
+    WHERE order_date BETWEEN '2023-01-01' AND '2023-12-31'
+    GROUP BY transaction_id
+    HAVING COUNT(DISTINCT product) > 1
+)
+SELECT 
+    product_combo,
+    COUNT(*) AS frequency
+FROM transaction_products
+GROUP BY product_combo
+HAVING COUNT(*) >= 5
+ORDER BY frequency DESC
+LIMIT 20;
+
+Action: Use for bundling and cross-sell recommendations
+
+
+QUERY 7.4: Churn Risk Prediction
+---------------------------------
+Purpose: Identify customers at risk of churning
+
+WITH customer_last_purchase AS (
+    SELECT 
+        customer_id,
+        MAX(order_date) AS last_purchase_date,
+        COUNT(DISTINCT transaction_id) AS total_orders,
+        SUM(total_amount) AS total_spent,
+        CURRENT_DATE - MAX(order_date) AS days_since_last_purchase
+    FROM transactions
+    GROUP BY customer_id
+)
+SELECT 
+    customer_id,
+    last_purchase_date,
+    days_since_last_purchase,
+    total_orders,
+    ROUND(total_spent, 2) AS total_spent,
+    CASE 
+        WHEN days_since_last_purchase > 180 THEN 'High Risk'
+        WHEN days_since_last_purchase BETWEEN 90 AND 180 THEN 'Medium Risk'
+        WHEN days_since_last_purchase < 90 THEN 'Low Risk'
+    END AS churn_risk
+FROM customer_last_purchase
+WHERE total_orders >= 2
+ORDER BY days_since_last_purchase DESC;
+
+Action: Launch win-back campaigns for High/Medium risk
+
+═══════════════════════════════════════════════════════════════
+QUERY OPTIMIZATION NOTES
+═══════════════════════════════════════════════════════════════
+
+Recommended Indexes:
+--------------------
+CREATE INDEX idx_order_date ON transactions(order_date);
+CREATE INDEX idx_customer_id ON transactions(customer_id);
+CREATE INDEX idx_category ON transactions(category);
+CREATE INDEX idx_segment ON transactions(segment);
+CREATE INDEX idx_customer_date ON transactions(customer_id, order_date);
+
+Performance Tips:
+-----------------
+1. Use date filters (WHERE clauses) to limit data scanned
+2. Add indexes on frequently filtered/joined columns
+3. Use CTEs for complex queries (better readability)
+4. Consider materialized views for dashboard queries
+5. Partition large tables by date for better performance
+
+═══════════════════════════════════════════════════════════════
+END OF SQL DOCUMENTATION
+═══════════════════════════════════════════════════════════════
+
+This documentation provides all SQL queries used in the E-Commerce
+Analytics project, enabling reproducibility and knowledge transfer.
+
+Author: Sweatha Hari
+Date: November 2024
+Portfolio Project: E-Commerce Customer Analytics Dashboard
