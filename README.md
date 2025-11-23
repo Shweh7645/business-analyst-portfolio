@@ -1,4 +1,7 @@
 # business-analyst-portfolio
+Sweatha Hari | Business Analyst | Data-Driven Problem Solver
+
+👋 About Me
 Business Analyst Portfolio - Data Analysis, Dashboards, and Strategic Insights.
 I'm a Business Analyst with an MSc in Business Analysis & Finance (First Class Honours) from the University of Leicester, UK. I specialize in transforming complex data into actionable business insights through analytics, visualization, and strategic recommendations.
 Core Competencies:
